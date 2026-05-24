@@ -2018,6 +2018,7 @@ ASK_AI_CSS = r"""
 }
 .ask-ai-fab:hover { background: var(--accent-2); }
 .ask-ai-fab:active { transform: translateY(0.5px); }
+.ask-ai-fab[hidden] { display: none !important; }
 @keyframes ask-fab-in {
   from { opacity: 0; transform: scale(0.9); }
   to   { opacity: 1; transform: scale(1); }
