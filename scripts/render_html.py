@@ -2583,7 +2583,8 @@ window.AskAI = (function() {
   const S = {
     panelOpen: false,
     configOpen: false,
-    selection: null,
+    selection: null,        // 实时跟踪的当前 document 选区 (随 selectionchange 变)
+    pinnedSelection: null,  // 点 FAB / 打开 panel 时 snapshot 一下选区, 锁定不被后续 textarea 焦点冲掉
     messages: [],
     config: null,
     isStreaming: false,
@@ -2661,6 +2662,9 @@ window.AskAI = (function() {
       // First-time: open config first (but allow ollama with empty key)
       if (!S.config) { openConfig(true); return; }
     }
+    // 把当前选区"锁死"成 pinnedSelection — 接下来 textarea 拿焦点导致
+    // document.selection 被清空也不影响, 第一条 user message 会用 pinnedSelection。
+    if (S.selection) S.pinnedSelection = S.selection;
     S.panelOpen = true;
     const panel = document.getElementById('ask-ai-panel');
     panel.classList.add('open');
@@ -2671,6 +2675,7 @@ window.AskAI = (function() {
   }
   function closePanel() {
     S.panelOpen = false;
+    S.pinnedSelection = null;  // 关 panel 时清掉锁定的选区
     const panel = document.getElementById('ask-ai-panel');
     panel.classList.remove('open');
     panel.setAttribute('aria-hidden', 'true');
@@ -2680,6 +2685,7 @@ window.AskAI = (function() {
   function resetConversation() {
     S.messages = [];
     S.lastSentContextHash = '';  // 重置 context cache, 下次发会重新带完整 context
+    S.pinnedSelection = null;    // 新对话也清掉旧选区
     const msgs = document.getElementById('ask-ai-messages');
     msgs.innerHTML = '<div class="ask-ai-empty">'
       + '<p>选中页面上任何一段文字 + 点浮动按钮，或者直接在下方输入问题。</p>'
@@ -2695,11 +2701,13 @@ window.AskAI = (function() {
     if (moduleId && TREE[moduleId]) {
       html += '<div>聚焦模块: <span class="ctx-breadcrumb">' + (TREE[moduleId].name || moduleId) + '</span></div>';
     }
-    if (S.selection) {
-      const truncated = S.selection.length > 80 ? S.selection.slice(0, 80) + '…' : S.selection;
-      html += '<div>选中: <span class="ctx-sel">"' + escapeHtml(truncated) + '"</span></div>';
+    // 优先用锁定的选区, 否则用当前实时选区
+    const selText = S.pinnedSelection || S.selection;
+    if (selText) {
+      const truncated = selText.length > 80 ? selText.slice(0, 80) + '…' : selText;
+      html += '<div>选中 (将作为下一条问题的引用): <span class="ctx-sel">"' + escapeHtml(truncated) + '"</span></div>';
     }
-    if (breadcrumb || moduleId || S.selection) {
+    if (breadcrumb || moduleId || selText) {
       pill.innerHTML = html;
       pill.hidden = false;
     } else {
@@ -2944,13 +2952,8 @@ window.AskAI = (function() {
     const moduleId = opts.moduleId || state.drawerOpen;
     let ctx = '';
 
-    // === 优先级 1: 选中文本 (如果有) ===
-    // 这是用户问"这是什么意思"时的真正主语, 必须放最前面 + 明确标重点。
-    // 之前的版本把选中文本放最后, 导致 AI 容易把"这"理解成"整个页面"。
-    if (S.selection) {
-      ctx += '## ⚠️ 用户选中的文本 (用户问题的主要主语 — "这/this/它" 通常指它)\n';
-      ctx += '---SELECTION START---\n' + S.selection + '\n---SELECTION END---\n\n';
-    }
+    // 注: 选中文本现在以 markdown 引用形式直接拼进 user message (见 sendMessage),
+    // 不再走 context 注入 — 引用块是 LLM 最不可能忽略的显式信号。
 
     // === 优先级 2: 用户当前展开的模块详情 ===
     if (moduleId && TREE[moduleId]) {
@@ -2995,7 +2998,13 @@ window.AskAI = (function() {
     wrap.className = 'ask-msg ' + role;
     wrap.innerHTML = '<div class="ask-msg-role">' + (role === 'user' ? 'YOU' : 'AI') + '</div>'
                    + '<div class="ask-msg-body"></div>';
-    wrap.querySelector('.ask-msg-body').textContent = text || '';
+    const body = wrap.querySelector('.ask-msg-body');
+    if (role === 'user' && text && text.includes('\n> ')) {
+      // 用户消息含 markdown 引用 — 走完整 markdown 渲染让 blockquote 显示出来
+      renderAssistantMarkdown(body, text);
+    } else {
+      body.textContent = text || '';
+    }
     msgs.appendChild(wrap);
     msgs.scrollTop = msgs.scrollHeight;
     return wrap;
@@ -3231,6 +3240,18 @@ window.AskAI = (function() {
     if (!userText || !userText.trim()) return;
     if (!S.config) { openConfig(true); return; }
 
+    // ---- 选中文本以 markdown 引用形式拼进 user 消息 (用户可见 + LLM 一定看得到) ----
+    // 这比 context 注入更可靠 — context 是 metadata 容易被 LLM 当背景忽略,
+    // 直接塞进 user message 的引用块是显式的"我在问这段"信号。
+    let displayUserText = userText;
+    let payloadUserText = userText;
+    if (S.pinnedSelection) {
+      const quoted = '> ' + S.pinnedSelection.split('\n').join('\n> ');
+      displayUserText = quoted + '\n\n' + userText;
+      payloadUserText = displayUserText;  // 发给 LLM 的也是引用 + 问题
+      S.pinnedSelection = null;  // 一次性引用, 后续轮不再重复 (上下文已建立)
+    }
+
     // ---- Compact context: 第一轮发完整, 之后只在 context 变化时重发 ----
     const isFirst = S.messages.length === 0;
     const fullCtx = snapshotContext({moduleId: state.drawerOpen});
@@ -3240,16 +3261,16 @@ window.AskAI = (function() {
     const ctxHash = String(h);
     let fullUserContent;
     if (isFirst || ctxHash !== S.lastSentContextHash) {
-      fullUserContent = fullCtx + '\n## 用户的问题\n' + userText;
+      fullUserContent = fullCtx + '\n## 用户的问题\n' + payloadUserText;
       S.lastSentContextHash = ctxHash;
     } else {
       // 后续轮且 context 未变: 只发问题, 节省 token
-      fullUserContent = userText;
+      fullUserContent = payloadUserText;
     }
 
     S.messages.push({role: 'user', content: fullUserContent});
 
-    appendMessage('user', userText);  // UI 只显示用户原文, 不显示注入的 context
+    appendMessage('user', displayUserText);  // UI 显示引用 + 问题, 让用户看见自己发了啥
     const assistantEl = appendMessage('assistant', '');
     assistantEl.classList.add('streaming');
     // 准备 thinking 区 + content 区 (即使 provider 不返回 thinking, 也无害)
@@ -3402,6 +3423,22 @@ window.AskAI = (function() {
           || e.key === 'ArrowUp' || e.key === 'ArrowDown') recheckSelection();
     });
     document.addEventListener('scroll', hideFab, true);
+
+    // 兜底: 点击任何地方 (非 FAB / 非 panel) 后立刻同步检查选区状态
+    // — 解决"点空白处取消选中, 但 FAB 还在"的 bug, 不等 selectionchange debounce
+    document.addEventListener('click', e => {
+      if (e.target.closest && (e.target.closest('#ask-ai-fab')
+                            || e.target.closest('.ask-ai-panel')
+                            || e.target.closest('.ask-ai-config'))) return;
+      // setTimeout 0 让浏览器先处理 click → selection collapse
+      setTimeout(() => {
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed || sel.toString().trim().length < 5) {
+          hideFab();
+          S.selection = null;
+        }
+      }, 0);
+    });
 
     const fab = document.getElementById('ask-ai-fab');
     fab.addEventListener('mousedown', e => e.preventDefault());  // don't lose selection
