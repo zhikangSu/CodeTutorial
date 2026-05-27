@@ -66,19 +66,34 @@ CUDA_VISIBLE_DEVICES=0 python .claude/skills/smolvla-trace/scripts/trace_runner.
 
 ### Step 2 · 推 TREE（新 repo 才需要）
 
-SmolVLA 跳过这步 —— TREE 已经预置在 `scripts/render_html.py` 里。
+SmolVLA 跳过这步 —— TREE 已经预置在 `scripts/render/tree_smolvla.py` 里。
 
-新 repo 时：
-1. 读 [references/topology-inference.md](references/topology-inference.md)
-2. 按 Step 1-8 顺次推：
-   - 读目标 policy class 的顶层 `forward` 源码（语法顺序，不是 trace 顺序）
-   - 识别拓扑（linear / Y-shape / fork-join）
-   - 给每个顶层 node 起 `concept_name` + `code_name` + `purpose_line`
-   - 用 trace JSON 填真实 shape（语义化维度名）
-   - 判定 composite vs leaf
-   - 标心脏方块 + training-only 分支
-   - 写 story_line（论文 abstract 末尾两句通常就是）
-3. 把推出来的 TREE dict 写到 `scripts/render_html.py` 顶部（替换 SmolVLA 那份）
+新 repo 时，先用 `infer_tree.py` 跑骨架，再用 [references/topology-inference.md](references/topology-inference.md) 补语义：
+
+```bash
+# 1) 机械化推骨架（path_map / decl_src / tree_skeleton / digest.md）
+cd scripts
+python -m render.infer_tree outputs/traces/<repo>/trace_<ts>.json --out-dir inferred/
+```
+
+输出 4 个文件:
+- `inferred/path_map.py`     — 自动检测的 `PATH_MAP`（src_file 前缀映射）
+- `inferred/decl_src.py`     — AST 找到的 leaf 声明位置（替换 trace 的 torch 内部 forward 行）
+- `inferred/tree_skeleton.py`— TREE 骨架（trace_name / src / repeat 全填好；name / sub / what / blurb 标 `TODO:`）
+- `inferred/digest.md`       — 给 Claude 的可读摘要 + 下一步 checklist
+
+```bash
+# 2) Claude 在对话里读 digest.md + 论文/README, 按 topology-inference.md 改 tree_skeleton.py
+#    - 把 TODO: 字段换成真正的 concept_name / blurb / what
+#    - 把 pipeline.stages 从 linear 改成 Y-shape (按 forward 语法顺序 + 论文)
+#    - 标 is_heart / training_only
+#    - 给关键 leaf 补 formula / callout
+
+# 3) 改好后改名为 render/tree_<repo>.py, 在 render/__init__.py 里替换 TREE 的 import 来源
+```
+
+infer_tree.py 只做机械化部分（trace 真相 + AST 解析），不试图推语义。SmolVLA-specific 硬编码集中在
+`render/tree_smolvla.py`、`render/source_links.py` 两个文件，按 inferred 的输出替换即可。
 
 ### Step 3 · 渲染 HTML
 
@@ -122,7 +137,19 @@ python .claude/skills/smolvla-trace/scripts/render_html.py outputs/traces/v18_de
 ├── scripts/
 │   ├── instrument.py              # Tracer 类：forward/backward/functional/optimizer hook + JSON dump
 │   ├── trace_runner.py            # CLI wrapper：env 设置 + 解析 --trace-* 自参数 + 调 lerobot-train.main()
-│   └── render_html.py             # JSON + TREE -> 单文件 HTML
+│   ├── render_html.py             # 入口：trace JSON + TREE -> 单文件 HTML
+│   └── render/                    # 拆分后的渲染包
+│       ├── __init__.py
+│       ├── trace_utils.py         # load_trace / fmt_shape / pair_events
+│       ├── source_links.py        # PATH_MAP / SMOLVLA_DECL_SRC / vscode_link
+│       ├── tree_smolvla.py        # ★ SmolVLA-specific TREE（换 repo 时替换为 tree_<repo>.py）
+│       ├── enrich.py              # 把 trace 真实 shape 填进 TREE
+│       ├── assets.py              # 资源 loader
+│       ├── infer_tree.py          # ★ 通用化工具：trace JSON -> TREE 骨架 + digest.md
+│       └── assets/                # 真文件 CSS / JS / HTML（不再是 Python 字符串）
+│           ├── main.css, main.js, katex.html
+│           ├── ask_ai.css, ask_ai.html
+│           └── ask_ai_js/         # IIFE 按职责拆 12 个文件, 字典序拼接
 └── references/
     ├── topology-inference.md      # ★ 给 Claude 看的：怎么从论文+源码+trace 推顶层拓扑（Step 1-8）
     ├── design-system.md           # 配色 / 字体 / 卡片 design tokens
