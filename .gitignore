@@ -3,3 +3,8 @@ __pycache__/
 *.pyo
 .DS_Store
 *.swp
+
+# Local-only working notes for the human + Claude session optimizing this skill.
+# Do not push — README.md / SKILL.md / HANDOFF.md are the canonical public docs.
+CLAUDE.md
+
