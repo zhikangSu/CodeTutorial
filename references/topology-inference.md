@@ -50,18 +50,74 @@ def forward(self, batch):
 
 ## Step 2 — 识别拓扑形状（Y / fork-join / linear）
 
-不是所有数据流都是直线。常见拓扑：
+不是所有数据流都是直线。**正确做法是从 forward 源码反推**（这一步唯一可靠）—— 不要试图把模型归类到某个预设模板，那是锚定陷阱。
 
-| 拓扑 | 触发信号 | 例子 |
-|---|---|---|
-| **Linear** | 每一步的输出唯一进入下一步的输入 | 普通 CNN 分类器 |
-| **Y-shape (merge)** | 两个独立产生的张量在某一步被一起消费 | VLA 模型（观测 + 动作）、CLIP 训练（image + text）、双流网络 |
-| **Fork-join** | 一个张量被复制走两条独立路径再合并 | ResNet block、U-Net skip connection |
-| **Multi-task** | 一个 backbone 输出被多个 head 消费 | 多任务学习 |
+下面的拓扑词汇表只是**统一表达**用的（让你描述拓扑时有名字可用），**不是 checklist 让你逐个套**：
 
-**检测方法**：把 `forward` 里每条 `=` 左边的变量建个依赖图。如果一个目标变量（如 `h`）的输入来自**两个互不依赖的来源**（`prefix_tokens` 和 `suffix_tokens` 各自独立产生），那这两个来源就是 Y 的两条腿，必须画成并列。
+### 拓扑词汇表（reference only）
 
-**反模式（v3 错误的）**：把 Y 形压平成 `prepare → embed_prefix → embed_suffix → vlm_expert` 的线性链。`embed_suffix` 不消费 `embed_prefix` 的输出，画成串行是错的。
+```
+Linear:                A → B → C → D
+                       每一步唯一消费上一步, 无分叉, 无合并
+
+Y-shape (merge):       A           D
+                          ╲       ╱
+                           B  →  C
+                          ╱       ╲
+                       E           F
+                       两个独立来源, 在某一步被合并消费
+                       例: VLA (observation + action)、joint encoder
+
+Fork-join:                   ╭─ B ─╮
+                       A ───┤      ├─ D
+                            ╰─ C ─╯
+                       一个变量被复制走多条路再合并
+                       例: ResNet residual、Inception module
+
+Dual-encoder:          A → B ──╮
+                                ├─ Loss(B_out, F_out)
+                       E → F ──╯
+                       两路平行处理, 不合并, 在 loss 处比较
+                       例: CLIP、Siamese network
+
+Encoder-decoder:       A → B → C ───╮
+                                     ├─ G → H → I
+                       D → E → F ───╯
+                       encoder 输出做 cross-attention 给 decoder
+                       例: T5、原版 Transformer、Whisper
+
+U-Net (skip):          A ─┬──────────────┬─ G
+                          │              │
+                          B ─┬────────┬─ F
+                              │      │
+                              C ─── E
+                                D
+                       深层与浅层 skip 拼接, 边降采样边保细节
+                       例: U-Net、stable diffusion 的 UNet
+
+Mixture-of-Experts:    A ─→ Router ─→ Expert_1, ..., Expert_k ─→ combine
+                       一个 router 决定哪些 expert 处理样本, 输出加权
+                       例: Mixtral 8x7B、Switch Transformer、Gshard
+
+Multi-task heads:           ╭─ Head_A (cls)
+                       A → B ─├─ Head_B (det)
+                            ╰─ Head_C (seg)
+                       共享 backbone 给多个独立 head
+                       例: Mask R-CNN、HRNet
+```
+
+罕见架构（mamba / RWKV / 状态空间 / 自定义混合）很可能不属于上面任何一类 —— 那就**老老实实画出它独特的 forward 流**，不要硬塞模板。
+
+### 检测方法（唯一可靠路径）
+
+读 `<root>` class 的 `forward()` 源码, 把每条 `=` 左边的变量当作图节点, 右边引用的变量当作入边, 画一张**变量依赖图**。然后:
+
+- 一个节点的入边来自**两个互不依赖的源头** → 那就是 merge / Y-shape
+- 一个变量被同时传给**多个调用** → fork
+- 两条链直到 loss 才碰面 → dual-encoder
+- 早期变量被**远后**的调用消费 → skip connection
+
+**反模式（v3 SmolVLA 错过的）**：把 Y 形压平成 `prepare → embed_prefix → embed_suffix → vlm_expert` 的线性链。`embed_suffix` 不消费 `embed_prefix` 的输出, 画成串行是错的。
 
 ## Step 3 — 给每个方块起两个名字
 

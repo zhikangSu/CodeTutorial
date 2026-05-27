@@ -42,6 +42,9 @@
 
 ## Step 2 — 识别拓扑（Y / fork-join / linear）
 
+> **⚠️ 不要去 `references/topology-inference.md` 的拓扑词汇表里"找匹配"**。那是 vocabulary 不是 checklist。
+> 正确做法是亲自画依赖图，让拓扑从代码里"长出来"——而不是套模板。
+
 从 forward 抽取依赖图：每条 `=` 左边的变量名是 node，右边引用的变量是入边。
 
 - 如果两个变量**独立产生**后被同一调用消费 → **Y-shape merge**
