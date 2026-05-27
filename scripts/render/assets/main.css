@@ -353,6 +353,8 @@ h1 {
   color: var(--text-2); border: 0.5px solid var(--border);
 }
 .drawer .badge.functional { background: #FFF5D6; color: #7A5A0A; border-color: #EBDCA5; }
+.drawer .badge.trained { background: #DFF1E4; color: #1F6A38; border-color: #B5E0BF; }
+.drawer .badge.frozen  { background: #F0EDE5; color: #847458; border-color: #D8D0BD; }
 .drawer h3 {
   font-size: 11.5px; font-weight: 500;
   color: var(--text-2); text-transform: uppercase;

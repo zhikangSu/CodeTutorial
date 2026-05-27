@@ -192,16 +192,28 @@ function openDrawer(id) {
     ? '<span class="call-count">× ' + n._callCount + '</span>' : '';
   const functionalBadge = n.functional ? '<span class="badge functional">functional</span>' : '';
   const repeatBadge = n.repeat ? '<span class="badge">part of × ' + n.repeat + ' repeated block</span>' : '';
+  // trained/frozen badge — based on whether this leaf received backward grads in the trace
+  let trainBadge = '';
+  if (n._trained === true) {
+    const bwdN = n._backward_count || 1;
+    trainBadge = '<span class="badge trained" title="该模块在 trace 里收到 ' + bwdN + ' 次梯度">✓ trained · ' + bwdN + ' grad' + (bwdN > 1 ? 's' : '') + '</span>';
+  } else if (n._trained === false) {
+    trainBadge = '<span class="badge frozen" title="该模块在 trace 里没收到任何梯度, 推测 requires_grad=False">✗ frozen</span>';
+  }
 
   const content = '<h2>' + n.name + (n.sub ? ' <span style="font-family: JetBrains Mono, monospace; font-size: 13px; color: var(--text-3); font-weight: 400;">· ' + n.sub + '</span>' : '') + '</h2>'
     + '<div class="qualname">' + (n._qualname || n.qualname || '') + callCountBadge + '</div>'
-    + ((functionalBadge || repeatBadge) ? '<div class="badge-row">' + functionalBadge + repeatBadge + '</div>' : '')
+    + ((functionalBadge || repeatBadge || trainBadge) ? '<div class="badge-row">' + functionalBadge + repeatBadge + trainBadge + '</div>' : '')
     + '<h3>Shape</h3>'
     + '<div class="shape-box">' + (n._shape_html || n.shape_html || '—') + '</div>'
     + '<h3>What it does</h3>'
     + '<p>' + (n.what || '') + '</p>'
     + (n._act_chart_svg ? n._act_chart_svg : '')
-    + (n.formula ? '<h3>Formula</h3><div class="formula">$$' + n.formula + '$$</div>' : '')
+    + (n.formula
+        ? '<h3>Formula</h3><div class="formula" data-katex-pre="' + (n._formulaHtml ? '1' : '0') + '">'
+          + (n._formulaHtml ? n._formulaHtml : '$$' + n.formula + '$$')
+          + '</div>'
+        : '')
     + (n.callout ? '<div class="callout">' + n.callout + '</div>' : '')
     + '<h3>Source</h3>'
     + '<div class="src-link">' + (n._src_link
@@ -228,8 +240,10 @@ function openDrawer(id) {
   document.getElementById('backdrop').classList.add('open');
   state.drawerOpen = id;
   if (window.renderMathInElement) {
+    // formula 已预渲的话 data-katex-pre="1", 不重复处理; 其余 (inline \( \) 在 what/callout) 仍走 auto-render
     renderMathInElement(document.getElementById('drawer-content'), {
-      delimiters: [{left: '$$', right: '$$', display: true}, {left: '\\(', right: '\\)', display: false}]
+      delimiters: [{left: '$$', right: '$$', display: true}, {left: '\\(', right: '\\)', display: false}],
+      ignoredClasses: ['katex-pre-rendered'],
     });
   }
 }
@@ -314,5 +328,30 @@ document.addEventListener('keydown', e => {
 });
 document.getElementById('drawer-close').addEventListener('click', closeDrawer);
 document.getElementById('backdrop').addEventListener('click', closeDrawer);
+
+// KaTeX 预热 + 预渲所有 leaf formula 到 _formulaHtml 缓存。
+// 跑在 idle 时段, 避免开第一个抽屉时撞 50-100ms 的 JIT + macro 编译延迟。
+function preRenderKatex() {
+  if (!window.katex) return;
+  // 1) 暖一次, 让 KaTeX 把所有内部 lookup table 实例化
+  try { window.katex.renderToString('x + y', {throwOnError: false}); } catch (e) {}
+  // 2) 把每个 leaf 的 formula 字段提前渲成 HTML 字符串, 缓存进 TREE
+  for (const id in TREE) {
+    const n = TREE[id];
+    if (n && n.formula && !n._formulaHtml) {
+      try {
+        n._formulaHtml = window.katex.renderToString(n.formula, {
+          displayMode: true, throwOnError: false,
+        });
+      } catch (e) { /* leave undefined; openDrawer falls back to live render */ }
+    }
+  }
+}
+// KaTeX 是 defer 加载, 不保证 render() 时已 ready — 用 requestIdleCallback 兜底, 没有就 setTimeout
+if (window.requestIdleCallback) {
+  requestIdleCallback(preRenderKatex, {timeout: 1500});
+} else {
+  setTimeout(preRenderKatex, 200);
+}
 
 render();

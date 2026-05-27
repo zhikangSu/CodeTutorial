@@ -1,15 +1,40 @@
-"""Enrich tree with real trace data (shapes, src, call counts)."""
+"""Enrich tree with real trace data (shapes, src, call counts, backward grads)."""
 
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import Any
 
 from .source_links import SMOLVLA_DECL_SRC, vscode_link, activation_svg
 from .trace_utils import find_tensor_shape, find_tensor_dtype, fmt_arrow
 
 
-def enrich_with_trace(tree: dict, calls_by_name: dict[str, list[dict]]) -> dict:
+def _backward_counts(trace: dict) -> Counter[str]:
+    """Count backward events per module dotted name, so leaves can show
+    a trained-vs-frozen badge in the drawer."""
+    mt = trace.get("module_tree", {})
+    id_to_name = {int(k): v["name"] for k, v in mt.items()}
+    counts: Counter[str] = Counter()
+    for e in trace.get("module_events", []):
+        if e.get("phase") != "backward":
+            continue
+        nm = id_to_name.get(e.get("module_id"))
+        if nm:
+            counts[nm] += 1
+    return counts
+
+
+def enrich_with_trace(tree: dict, trace: dict) -> dict:
+    """Fill TREE nodes with real shape / src / callCount / backward info.
+
+    `trace` is the full trace JSON; we derive calls_by_name and backward
+    counts internally so the caller doesn't have to.
+    """
+    from .trace_utils import pair_events_by_name
+    calls_by_name = pair_events_by_name(trace)
+    bwd_counts = _backward_counts(trace)
+
     enriched: dict[str, Any] = {}
     for nid, node in tree.items():
         node = dict(node)
@@ -89,5 +114,24 @@ def enrich_with_trace(tree: dict, calls_by_name: dict[str, list[dict]]) -> dict:
             node["_src_link"] = vscode_link(node["_src"])
         if node.get("act_chart"):
             node["_act_chart_svg"] = activation_svg(node["act_chart"])
+
+        # Backward / training state — only meaningful for leaves with trace_name
+        if node.get("type") == "leaf" and node.get("trace_name"):
+            tn = node["trace_name"]
+            # For repeated layers, sum backward across all layers
+            if ".layers.0." in tn:
+                pattern = re.sub(r"\.layers\.0\.", r".layers.\\d+.", re.escape(tn))
+                regex = re.compile("^" + pattern + "$")
+                bwd_n = sum(c for n, c in bwd_counts.items() if regex.match(n))
+            else:
+                bwd_n = bwd_counts.get(tn, 0)
+            if bwd_n > 0:
+                node["_trained"] = True
+                node["_backward_count"] = bwd_n
+            elif not node.get("functional"):
+                # Only mark "frozen" for real nn.Modules; functional ops never
+                # have parameter gradients regardless of training mode.
+                node["_trained"] = False
+
         enriched[nid] = node
     return enriched

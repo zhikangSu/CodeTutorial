@@ -32,14 +32,12 @@ from render import (
     bundle_assets,
     enrich_with_trace,
     load_trace,
-    pair_events_by_name,
 )
 
 
 def render(trace_path: Path, out_path: Path) -> None:
     trace = load_trace(trace_path)
-    calls_by_name = pair_events_by_name(trace)
-    enriched_tree = enrich_with_trace(TREE, calls_by_name)
+    enriched_tree = enrich_with_trace(TREE, trace)
 
     assets = bundle_assets()
     tree_json = json.dumps(enriched_tree, ensure_ascii=False)
