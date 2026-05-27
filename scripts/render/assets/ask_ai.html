@@ -1,0 +1,144 @@
+<!-- 浮动 Ask AI 按钮 (选中文字后出现) -->
+<button id="ask-ai-fab" class="ask-ai-fab" hidden type="button" title="问 AI 关于这段内容 (Ctrl+I 也可)">
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+    <path d="M3 12 L13 4"/><path d="M13 4 L9 4 M13 4 L13 8"/>
+    <circle cx="4" cy="13" r="1.2" fill="currentColor"/>
+  </svg>
+  <span>问 AI</span>
+</button>
+
+<!-- Q&A 面板 -->
+<aside id="ask-ai-panel" class="ask-ai-panel" hidden aria-hidden="true">
+  <header class="ask-ai-panel-head">
+    <div class="ask-ai-panel-title">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M3 12 L13 4"/><path d="M13 4 L9 4 M13 4 L13 8"/>
+        <circle cx="4" cy="13" r="1.2" fill="currentColor"/>
+      </svg>
+      <span>问 AI</span>
+    </div>
+    <div class="ask-ai-panel-actions">
+      <button class="ask-ai-icon-btn" id="ask-ai-reset" title="清空对话">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 8a6 6 0 1 0 1.5-4M2 3v3h3"/></svg>
+      </button>
+      <button class="ask-ai-icon-btn" id="ask-ai-settings" title="API 设置">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.5 1.5M11.5 11.5L13 13M3 13l1.5-1.5M11.5 4.5L13 3"/></svg>
+      </button>
+      <button class="ask-ai-icon-btn" id="ask-ai-close" title="关闭 (Esc)">×</button>
+    </div>
+  </header>
+  <div class="ask-ai-context" id="ask-ai-context-pill" hidden></div>
+  <div class="ask-ai-messages" id="ask-ai-messages">
+    <div class="ask-ai-empty">
+      <p>选中页面上任何一段文字 + 点浮动按钮，或者直接在下方输入问题。</p>
+      <p class="ask-ai-empty-sub">AI 会自动收到你当前所在的 breadcrumb 路径和打开的模块详情, 不需要你重复描述。</p>
+    </div>
+  </div>
+  <form class="ask-ai-input-row" id="ask-ai-form">
+    <textarea id="ask-ai-input" class="ask-ai-input" rows="2" placeholder="问点什么... (Ctrl+Enter 发送)" autocomplete="off"></textarea>
+    <button type="submit" class="ask-ai-send" id="ask-ai-send" title="发送 (Ctrl+Enter)">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 8 L14 2 L11 14 L8 9 L2 8 Z"/></svg>
+    </button>
+  </form>
+  <div class="ask-ai-footer">
+    <div class="ask-ai-model-switcher" id="model-switcher">
+      <button type="button" class="ask-ai-model-tag" id="ask-ai-model-tag" title="点击切换 model">未配置</button>
+      <div class="ask-model-dropdown" id="model-dropdown" hidden></div>
+    </div>
+    <span class="ask-ai-hint">Ctrl+I 唤起 · Esc 关闭</span>
+  </div>
+</aside>
+
+<!-- BYOK 配置模态框 -->
+<div id="ask-ai-config-backdrop" class="ask-ai-config-backdrop" hidden></div>
+<div id="ask-ai-config" class="ask-ai-config" hidden role="dialog" aria-modal="true">
+  <header class="ask-ai-config-head">
+    <h3>API 配置 (BYOK)</h3>
+    <button class="ask-ai-icon-btn" id="ask-ai-config-close">×</button>
+  </header>
+  <div class="ask-ai-config-body">
+    <div class="ask-ai-warn">
+      <strong>注意:</strong> API key 仅保存在你浏览器本地 (localStorage)，不会上传任何服务器。HTML 是离线运行的，所有 API 请求直接从你的浏览器发到你配置的端点。<br>
+      <strong>不要在以下场景使用:</strong> 把 HTML 部署到公开网站 / 多人共享这台机器 / 通过不可信网络访问。
+    </div>
+
+    <label class="ask-ai-field">
+      <span>Provider</span>
+      <select id="cfg-provider">
+        <option value="gemini">Gemini (OpenAI-compatible)</option>
+        <option value="openai">OpenAI</option>
+        <option value="deepseek">DeepSeek</option>
+        <option value="ollama">Ollama (本地)</option>
+        <option value="custom">自定义</option>
+      </select>
+    </label>
+
+    <div class="ask-ai-section-title">Provider 配置</div>
+    <label class="ask-ai-field">
+      <span>API Base URL</span>
+      <input id="cfg-base-url" type="text" placeholder="https://...">
+    </label>
+    <label class="ask-ai-field">
+      <span>API Key</span>
+      <input id="cfg-api-key" type="password" placeholder="sk-... / Ollama 本地可留空">
+    </label>
+    <div class="ask-ai-field">
+      <span>Model</span>
+      <div class="ask-ai-model-row">
+        <select id="cfg-model-select" class="ask-ai-model-select" hidden></select>
+        <input id="cfg-model-input" type="text" class="ask-ai-model-input" placeholder="例: gemini-2.5-flash">
+        <button id="cfg-model-refresh" type="button" class="ask-ai-icon-btn-inline" title="从 /v1/models 拉取可用 model 列表">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M2 8a6 6 0 1 0 1.5-4M2 3v3h3"/>
+          </svg>
+        </button>
+      </div>
+      <div id="cfg-model-hint" class="ask-ai-field-hint">↻ 点刷新可拉取 model 列表; 拉取失败时保持手填</div>
+    </div>
+
+    <div class="ask-ai-section-title">通用 inference 参数</div>
+    <div class="ask-ai-field-grid">
+      <label class="ask-ai-field">
+        <span>Temperature</span>
+        <input id="cfg-temp" type="number" min="0" max="2" step="0.05" value="0.4">
+      </label>
+      <label class="ask-ai-field">
+        <span>Max tokens</span>
+        <input id="cfg-max-tokens" type="number" min="64" step="64" value="8192">
+      </label>
+      <label class="ask-ai-field">
+        <span>Top-p</span>
+        <input id="cfg-top-p" type="number" min="0" max="1" step="0.05" value="1.0">
+      </label>
+      <label class="ask-ai-field">
+        <span>对话保留轮数</span>
+        <select id="cfg-retention">
+          <option value="1">1</option>
+          <option value="3">3</option>
+          <option value="5" selected>5</option>
+          <option value="10">10</option>
+          <option value="-1">无限</option>
+        </select>
+      </label>
+    </div>
+    <label class="ask-ai-field">
+      <span>System prompt (留空用默认)</span>
+      <textarea id="cfg-sys-prompt" rows="3" placeholder="留空 = 用内置默认 prompt (强调 markdown 格式 + 简洁 + 用户当前位置感知)"></textarea>
+    </label>
+
+    <div class="ask-ai-config-row">
+      <button class="ask-ai-btn" id="cfg-test" type="button">测试连接</button>
+      <button class="ask-ai-btn primary" id="cfg-save" type="button">保存</button>
+    </div>
+    <div class="ask-ai-config-status" id="cfg-status"></div>
+
+    <details class="ask-ai-help">
+      <summary>常见问题</summary>
+      <p><strong>CORS 错误?</strong> 如果用 <code>file://</code> 直接打开 HTML 撞 CORS, 试试用本地 server: <code>cd outputs/traces/v18_demo &amp;&amp; python -m http.server 8000</code>, 然后访问 <code>http://localhost:8000/latest.html</code>。</p>
+      <p><strong>Gemini key?</strong> 在 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> 申请。免费额度够本工具使用。</p>
+      <p><strong>Ollama 本地?</strong> 启动 <code>ollama serve</code> 后, base URL 填 <code>http://localhost:11434/v1</code>, key 留空, model 点 ↻ 自动拉到你 pull 过的。</p>
+      <p><strong>Model 拉不到?</strong> 有些 endpoint 不支持 <code>/v1/models</code> 列表 (尤其 Gemini OpenAI-compat 层)。保持手填模式即可, 不影响 chat 使用。</p>
+    </details>
+  </div>
+</div>
+<div id="toast" class="toast"></div>
