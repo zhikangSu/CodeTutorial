@@ -3,6 +3,7 @@ const TREE = __TREE_JSON__;
 const state = {
   path: ['pipeline'],
   drawerOpen: null,
+  showBackward: false,  // toggled by the "↶ 反向" button on pipeline view
 };
 
 function renderBreadcrumb() {
@@ -62,7 +63,7 @@ function renderStages(stages) {
   stages.forEach((stage, i) => {
     const stageClass = ['stage'];
     if (stage.training_only) stageClass.push('training-only');
-    html += '<div class="' + stageClass.join(' ') + '" data-stage-idx="' + i + '">';
+    html += '<div class="' + stageClass.join(' ') + '" data-stage-idx="' + i + '" data-grad="' + (stage._received_grad ? '1' : '0') + '">';
     stage.nodes.forEach(nodeId => {
       const heart = !!stage.is_heart;
       html += '<div class="node-slot" data-id="' + nodeId + '">' +
@@ -78,11 +79,23 @@ function renderStages(stages) {
       html += '</div>';
     }
   });
+  // Toggle button for the backward path (only visible when this stages view has any grad-receiving stage)
+  const anyGrad = stages.some(s => s._received_grad);
+  const backwardBtn = anyGrad
+    ? '<button id="backward-toggle" class="backward-toggle' + (state.showBackward ? ' active' : '') + '" type="button" title="切换显示 backward 路径 (训练时梯度流向)">'
+      + (state.showBackward ? '↶ 隐藏反向' : '↶ 显示反向梯度')
+      + '</button>'
+    : '';
   return '<div class="stages-wrap">'
     + '<svg class="arrows-svg" id="arrows-svg" xmlns="http://www.w3.org/2000/svg">'
-    +   '<defs><marker id="arrowhead" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">'
-    +     '<path d="M0,0 L8,5 L0,10 L2,5 Z" fill="#9A9080" /></marker></defs>'
+    +   '<defs>'
+    +     '<marker id="arrowhead" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">'
+    +       '<path d="M0,0 L8,5 L0,10 L2,5 Z" fill="#9A9080" /></marker>'
+    +     '<marker id="backhead" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">'
+    +       '<path d="M0,0 L8,5 L0,10 L2,5 Z" fill="#C7472A" /></marker>'
+    +   '</defs>'
     + '</svg>'
+    + backwardBtn
     + html
     + '</div>';
 }
@@ -94,6 +107,14 @@ function renderCanvas() {
   if (cur.layout === 'stages' && cur.stages) {
     canvas.innerHTML = renderStages(cur.stages);
     canvas.querySelectorAll('.node').forEach(el => attachNodeHandlers(el));
+    // Wire backward toggle button (only present when any stage received gradients)
+    const bwdBtn = document.getElementById('backward-toggle');
+    if (bwdBtn) {
+      bwdBtn.addEventListener('click', () => {
+        state.showBackward = !state.showBackward;
+        render();
+      });
+    }
     // Compute arrow positions after browser layout
     requestAnimationFrame(() => { drawStageArrows(cur.stages); });
     // Redraw on window resize
@@ -137,6 +158,12 @@ function drawStageArrows(stages) {
     const fromTrainingOnly = stageEls[i].classList.contains('training-only');
     const toTrainingOnly = stageEls[i + 1].classList.contains('training-only');
     const dashed = fromTrainingOnly || toTrainingOnly;
+    // Did the next + this stage receive gradients? (set by enrich.py from leaf _trained)
+    // Backward arrow goes from stage[i+1] back to stage[i]; draw only when BOTH have grad
+    // (otherwise grad died somewhere along the chain — typical at the raw_batch / data boundary).
+    const nextHasGrad = stageEls[i + 1].dataset.grad === '1';
+    const thisHasGrad = stageEls[i].dataset.grad === '1';
+    const drawBackward = state.showBackward && nextHasGrad && thisHasGrad;
     fromNodes.forEach(fn => {
       const fr = fn.getBoundingClientRect();
       const fx = fr.left + fr.width / 2 - wrapRect.left;
@@ -146,6 +173,7 @@ function drawStageArrows(stages) {
         const tx = tr.left + tr.width / 2 - wrapRect.left;
         const ty = tr.top - wrapRect.top;
         const midY = (fy + ty) / 2;
+        // Forward arrow (from earlier → later)
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('d', 'M ' + fx + ',' + fy + ' C ' + fx + ',' + midY + ' ' + tx + ',' + midY + ' ' + tx + ',' + ty);
         path.setAttribute('stroke', '#9A9080');
@@ -155,6 +183,27 @@ function drawStageArrows(stages) {
         path.setAttribute('marker-end', 'url(#arrowhead)');
         if (dashed) path.setAttribute('stroke-dasharray', '5,4');
         svg.appendChild(path);
+
+        // Backward arrow (from later → earlier), drawn offset to the right
+        // so it doesn't overlap the forward arrow. Red dashed.
+        if (drawBackward) {
+          const offset = 12;  // shift backward arrow right of forward
+          const bx_f = tx + offset, by_f = ty;
+          const bx_t = fx + offset, by_t = fy;
+          const bmidY = (by_f + by_t) / 2;
+          const backPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          backPath.setAttribute('d',
+            'M ' + bx_f + ',' + by_f
+            + ' C ' + bx_f + ',' + bmidY + ' ' + bx_t + ',' + bmidY + ' ' + bx_t + ',' + by_t);
+          backPath.setAttribute('stroke', '#C7472A');
+          backPath.setAttribute('stroke-width', '1.2');
+          backPath.setAttribute('stroke-dasharray', '4,3');
+          backPath.setAttribute('fill', 'none');
+          backPath.setAttribute('opacity', '0.85');
+          backPath.setAttribute('class', 'arrow-line arrow-backward');
+          backPath.setAttribute('marker-end', 'url(#backhead)');
+          svg.appendChild(backPath);
+        }
       });
     });
   }

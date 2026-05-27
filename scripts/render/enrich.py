@@ -134,4 +134,42 @@ def enrich_with_trace(tree: dict, trace: dict) -> dict:
                 node["_trained"] = False
 
         enriched[nid] = node
+
+    # Second pass: propagate "received gradients" up from leaves to composites,
+    # so the backward path can be drawn on the top-level Y-shape diagram.
+    # A composite is marked _received_grad=True if any of its descendant leaves
+    # has _trained=True. training_only stages (loss/backward_step) are always
+    # treated as on the backward path.
+    def _has_grad(nid: str, visited: set[str] | None = None) -> bool:
+        visited = visited or set()
+        if nid in visited:
+            return False
+        visited.add(nid)
+        n = enriched.get(nid)
+        if not n:
+            return False
+        if n.get("type") == "leaf":
+            return bool(n.get("_trained"))
+        for child_id in n.get("children", []) or []:
+            if _has_grad(child_id, visited):
+                return True
+        return False
+
+    for nid, n in enriched.items():
+        if n.get("type") == "composite" and nid != "pipeline":
+            if _has_grad(nid):
+                n["_received_grad"] = True
+    # pipeline stages also need flags (the JS reads them to decide which
+    # backward arrows to draw between top-level boxes)
+    pipeline = enriched.get("pipeline")
+    if pipeline and pipeline.get("stages"):
+        for stage in pipeline["stages"]:
+            if stage.get("training_only"):
+                stage["_received_grad"] = True
+                continue
+            for node_id in stage.get("nodes", []):
+                if _has_grad(node_id):
+                    stage["_received_grad"] = True
+                    break
+
     return enriched

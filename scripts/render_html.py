@@ -68,6 +68,7 @@ def render(trace_path: Path, out_path: Path) -> None:
         '<span class="legend-item"><span class="swatch leaf"></span>leaf · click for details</span>'
         '<span class="legend-item"><span class="swatch functional"></span>functional (not nn.Module)</span>'
         '<span class="legend-item">hover for tooltip</span>'
+        '<span class="legend-item">点右上"↶ 反向梯度"看 backward 流向</span>'
         '<span class="legend-item"><kbd>Esc</kbd> close drawer / pop breadcrumb</span>'
         '</div>'
     )
