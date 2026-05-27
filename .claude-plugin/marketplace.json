@@ -1,0 +1,14 @@
+{
+  "name": "code-tutorial",
+  "owner": {
+    "name": "zhikangSu",
+    "url": "https://github.com/zhikangSu"
+  },
+  "plugins": [
+    {
+      "name": "code-tutorial",
+      "source": "./",
+      "description": "Trace one PyTorch training step, capture forward + backward, render an interactive HTML architecture diagram."
+    }
+  ]
+}

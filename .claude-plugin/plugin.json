@@ -1,0 +1,20 @@
+{
+  "name": "code-tutorial",
+  "version": "0.1.0",
+  "description": "Trace one PyTorch training step (forward + backward + 1× optimizer.step), capture every nn.Module call with real tensor shapes, and render an interactive single-file HTML architecture diagram with KaTeX formulas, vscode:// source jumps, and an embedded BYOK \"Ask AI\" widget.",
+  "author": {
+    "name": "zhikangSu",
+    "url": "https://github.com/zhikangSu"
+  },
+  "homepage": "https://github.com/zhikangSu/CodeTutorial",
+  "repository": "https://github.com/zhikangSu/CodeTutorial",
+  "license": "MIT",
+  "keywords": [
+    "pytorch",
+    "trace",
+    "architecture",
+    "visualization",
+    "training",
+    "education"
+  ]
+}
