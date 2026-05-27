@@ -229,15 +229,18 @@ def _collapse_repeated_layers(names: list[str]) -> tuple[list[str], dict[str, in
     return deduped, repeats
 
 
-def _make_node_id(name: str) -> str:
+def _make_node_id(name: str, strip_prefix: str = "") -> str:
     """Convert a dotted module name to a TREE node id.
 
     Strategy:
+    - Optionally strip a common prefix shared by all nodes (e.g. 'model.')
     - Take the last 2 non-numeric segments (skip `0` from `.layers.0.` etc)
     - Replace dots with `_`
     - Strip leading digits (which would make invalid identifiers)
     Caller is expected to dedupe in case of collisions.
     """
+    if strip_prefix and name.startswith(strip_prefix):
+        name = name[len(strip_prefix):]
     parts = [p for p in name.split(".") if not p.isdigit()]
     if len(parts) >= 2:
         tail = "_".join(parts[-2:])
@@ -247,6 +250,30 @@ def _make_node_id(name: str) -> str:
         tail = name.replace(".", "_")
     tail = re.sub(r"^layers_", "", tail)
     return re.sub(r"^\d+_?", "", tail) or "node"
+
+
+def _common_prefix(names: list[str]) -> str:
+    """Return the longest dotted-name prefix shared by all input names, with
+    a trailing dot. Returns '' if no shared prefix (or all names are top-level).
+
+    Used to strip vacuous wrapper segments like 'model.' from generated node ids
+    when <root> has only one child class.
+    """
+    if not names:
+        return ""
+    split = [n.split(".") for n in names]
+    common: list[str] = []
+    for segs in zip(*split):
+        if len(set(segs)) == 1:
+            common.append(segs[0])
+        else:
+            break
+    if not common:
+        return ""
+    # Always leave at least 1 segment in the resulting name, so strip only N-1
+    if all(len(s) <= len(common) for s in split):
+        common = common[:-1]
+    return ".".join(common) + "." if common else ""
 
 
 def _infer_hint(shape: list[int] | None) -> str:
@@ -331,11 +358,16 @@ def infer_tree_skeleton(trace: dict, decl_src: dict[str, str], path_map: dict[st
     name_to_id: dict[str, str] = {}
     used_ids: set[str] = set()
 
+    # Compute the common prefix (e.g. 'model.') to strip from all generated
+    # node ids — keeps them concise when <root> has only one wrapper child.
+    common_prefix = _common_prefix(all_names)
+
     def _assign_id(dotted: str) -> str:
-        candidate = _make_node_id(dotted)
+        candidate = _make_node_id(dotted, strip_prefix=common_prefix)
         if candidate in used_ids:
-            # disambiguate with longer suffix
-            parts = dotted.split(".")
+            # disambiguate with longer suffix — skip numeric (layer-index) segments
+            tail = dotted[len(common_prefix):] if dotted.startswith(common_prefix) else dotted
+            parts = [p for p in tail.split(".") if not p.isdigit()]
             for take in range(3, len(parts) + 1):
                 candidate = "_".join(parts[-take:]).replace(".", "_")
                 if candidate not in used_ids:
